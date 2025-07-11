@@ -18,19 +18,19 @@ type Config struct {
 
 // SpiderConfig 爬虫配置
 type SpiderConfig struct {
-	Concurrent int    `yaml:"concurrent"`     // 并发数
-	Delay      int    `yaml:"delay"`          // 请求间隔（毫秒）
-	UserAgent  string `yaml:"user_agent"`     // 用户代理
-	Timeout    int    `yaml:"timeout"`        // 超时时间（秒）
-	Retries    int    `yaml:"retries"`        // 重试次数
-	ProxyURL   string `yaml:"proxy_url"`      // 代理地址
+	Concurrent int    `yaml:"concurrent"` // 并发数
+	Delay      int    `yaml:"delay"`      // 请求间隔（毫秒）
+	UserAgent  string `yaml:"user_agent"` // 用户代理
+	Timeout    int    `yaml:"timeout"`    // 超时时间（秒）
+	Retries    int    `yaml:"retries"`    // 重试次数
+	ProxyURL   string `yaml:"proxy_url"`  // 代理地址
 }
 
 // StorageConfig 存储配置
 type StorageConfig struct {
-	Type      string `yaml:"type"`       // 存储类型: file, database, excel
-	OutputDir string `yaml:"output_dir"` // 输出目录
-	Database  DBConfig `yaml:"database"`  // 数据库配置
+	Type      string   `yaml:"type"`       // 存储类型: file, database, excel
+	OutputDir string   `yaml:"output_dir"` // 输出目录
+	Database  DBConfig `yaml:"database"`   // 数据库配置
 }
 
 // DBConfig 数据库配置
@@ -51,11 +51,11 @@ type LoggingConfig struct {
 
 // WebConfig Web服务器配置
 type WebConfig struct {
-	Port       int       `yaml:"port"`        // 服务器端口
-	StaticPath string    `yaml:"static_path"` // 静态文件路径
-	APIPrefix  string    `yaml:"api_prefix"`  // API前缀
-	CORS       CORSConfig `yaml:"cors"`       // CORS配置
-	Auth       AuthConfig `yaml:"auth"`       // 认证配置
+	Port       int        `yaml:"port"`        // 服务器端口
+	StaticPath string     `yaml:"static_path"` // 静态文件路径
+	APIPrefix  string     `yaml:"api_prefix"`  // API前缀
+	CORS       CORSConfig `yaml:"cors"`        // CORS配置
+	Auth       AuthConfig `yaml:"auth"`        // 认证配置
 }
 
 // CORSConfig CORS配置
@@ -72,25 +72,10 @@ type AuthConfig struct {
 	TokenExpire int    `yaml:"token_expire"` // Token过期时间（小时）
 }
 
-// SiteConfig 站点配置结构
-type SiteConfig struct {
-	Sites []Site `yaml:"sites"`
-}
-
-// Site 单个站点配置
-type Site struct {
-	Name        string            `yaml:"name"`         // 站点名称
-	BaseURL     string            `yaml:"base_url"`     // 基础URL
-	StartURLs   []string          `yaml:"start_urls"`   // 起始URL列表
-	Selectors   map[string]string `yaml:"selectors"`    // CSS选择器
-	Enabled     bool              `yaml:"enabled"`      // 是否启用
-	Description string            `yaml:"description"`  // 描述
-}
-
 // LoadConfig 加载主配置文件
 func LoadConfig() (*Config, error) {
 	configPath := filepath.Join("config", "config.yaml")
-	
+
 	data, err := ioutil.ReadFile(configPath)
 	if err != nil {
 		return nil, fmt.Errorf("读取配置文件失败: %w", err)
@@ -105,23 +90,6 @@ func LoadConfig() (*Config, error) {
 	setDefaults(&config)
 
 	return &config, nil
-}
-
-// LoadSiteConfig 加载站点配置文件
-func LoadSiteConfig() (*SiteConfig, error) {
-	configPath := filepath.Join("config", "sites.yaml")
-	
-	data, err := ioutil.ReadFile(configPath)
-	if err != nil {
-		return nil, fmt.Errorf("读取站点配置文件失败: %w", err)
-	}
-
-	var siteConfig SiteConfig
-	if err := yaml.Unmarshal(data, &siteConfig); err != nil {
-		return nil, fmt.Errorf("解析站点配置文件失败: %w", err)
-	}
-
-	return &siteConfig, nil
 }
 
 // setDefaults 设置默认配置值
@@ -142,7 +110,7 @@ func setDefaults(config *Config) {
 		config.Spider.Retries = 3
 	}
 	if config.Storage.Type == "" {
-		config.Storage.Type = "file"
+		config.Storage.Type = "database" // 只保留 database 类型
 	}
 	if config.Storage.OutputDir == "" {
 		config.Storage.OutputDir = "./data/output"
@@ -153,7 +121,7 @@ func setDefaults(config *Config) {
 	if config.Logging.File == "" {
 		config.Logging.File = "./data/logs/crawler.log"
 	}
-	
+
 	// Web服务器默认配置
 	if config.Web.Port == 0 {
 		config.Web.Port = 8080
@@ -164,4 +132,4 @@ func setDefaults(config *Config) {
 	if config.Web.APIPrefix == "" {
 		config.Web.APIPrefix = "/api/v1"
 	}
-} 
+}

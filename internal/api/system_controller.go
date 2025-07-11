@@ -4,11 +4,13 @@ import (
 	"database/sql"
 	"encoding/json"
 	"runtime"
+	"strconv"
+	"strings"
 	"time"
 
-	"github.com/gin-gonic/gin"
 	"example.com/m/v2/internal/config"
 	"example.com/m/v2/internal/utils"
+	"github.com/gin-gonic/gin"
 )
 
 // SystemController 系统控制器
@@ -75,21 +77,16 @@ func (sc *SystemController) GetConfig(c *gin.Context) {
 	// 返回配置信息（隐藏敏感信息）
 	cfg := map[string]interface{}{
 		"spider": map[string]interface{}{
-			"user_agent":   sc.config.Spider.UserAgent,
-			"concurrent":   sc.config.Spider.Concurrent,
-			"delay":        sc.config.Spider.Delay,
-			"timeout":      sc.config.Spider.Timeout,
-			"max_depth":    sc.config.Spider.MaxDepth,
-			"max_pages":    sc.config.Spider.MaxPages,
-			"retry_times":  sc.config.Spider.RetryTimes,
-			"retry_delay":  sc.config.Spider.RetryDelay,
+			"user_agent": sc.config.Spider.UserAgent,
+			"concurrent": sc.config.Spider.Concurrent,
+			"delay":      sc.config.Spider.Delay,
+			"timeout":    sc.config.Spider.Timeout,
+			"retries":    sc.config.Spider.Retries,
+			"proxy_url":  sc.config.Spider.ProxyURL,
 		},
 		"storage": map[string]interface{}{
-			"type": sc.config.Storage.Type,
-			"file": map[string]interface{}{
-				"format": sc.config.Storage.File.Format,
-				"path":   sc.config.Storage.File.Path,
-			},
+			"type":       sc.config.Storage.Type,
+			"output_dir": sc.config.Storage.OutputDir,
 			"database": map[string]interface{}{
 				"driver": sc.config.Storage.Database.Driver,
 				"host":   sc.config.Storage.Database.Host,
@@ -99,12 +96,13 @@ func (sc *SystemController) GetConfig(c *gin.Context) {
 			},
 		},
 		"logging": map[string]interface{}{
-			"level":  sc.config.Logging.Level,
-			"format": sc.config.Logging.Format,
+			"level": sc.config.Logging.Level,
+			"file":  sc.config.Logging.File,
 		},
-		"debug": map[string]interface{}{
-			"enable":  sc.config.Debug.Enable,
-			"verbose": sc.config.Debug.Verbose,
+		"web": map[string]interface{}{
+			"port":        sc.config.Web.Port,
+			"static_path": sc.config.Web.StaticPath,
+			"api_prefix":  sc.config.Web.APIPrefix,
 		},
 	}
 
@@ -132,7 +130,7 @@ func (sc *SystemController) UpdateConfig(c *gin.Context) {
 		VALUES ('system_config', ?, '系统配置', NOW())
 		ON DUPLICATE KEY UPDATE config_value = ?, updated_at = NOW()
 	`, configJSON, configJSON)
-	
+
 	if err != nil {
 		sc.logger.Error("更新系统配置失败", "error", err)
 		c.JSON(500, gin.H{"error": "更新失败"})
@@ -146,32 +144,40 @@ func (sc *SystemController) UpdateConfig(c *gin.Context) {
 // GetLogs 获取系统日志
 func (sc *SystemController) GetLogs(c *gin.Context) {
 	level := c.DefaultQuery("level", "")
-	page, _ := c.GetQuery("page")
-	pageSize := c.DefaultQuery("page_size", "50")
-	
-	if page == "" {
-		page = "1"
+	pageStr := c.DefaultQuery("page", "1")
+	pageSizeStr := c.DefaultQuery("page_size", "50")
+
+	page, err := strconv.Atoi(pageStr)
+	if err != nil || page < 1 {
+		page = 1
 	}
 
-	// 构建查询条件
-	where := "1=1"
+	pageSize, err := strconv.Atoi(pageSizeStr)
+	if err != nil || pageSize <= 0 {
+		pageSize = 50
+	}
+	// 为了安全和性能，限制每页最大数量
+	if pageSize > 200 {
+		pageSize = 200
+	}
+
+	offset := (page - 1) * pageSize
+
+	// 使用 strings.Builder 安全地构建查询
+	var queryBuilder strings.Builder
 	args := []interface{}{}
 
+	queryBuilder.WriteString("SELECT level, message, details, created_at FROM task_logs WHERE 1=1")
+
 	if level != "" {
-		where += " AND level = ?"
+		queryBuilder.WriteString(" AND level = ?")
 		args = append(args, level)
 	}
 
-	// 查询日志
-	query := `
-		SELECT level, message, details, created_at
-		FROM task_logs 
-		WHERE ` + where + `
-		ORDER BY created_at DESC 
-		LIMIT ` + pageSize + ` OFFSET ` + page
-	`
+	queryBuilder.WriteString(" ORDER BY created_at DESC LIMIT ? OFFSET ?")
+	args = append(args, pageSize, offset)
 
-	rows, err := sc.db.Query(query, args...)
+	rows, err := sc.db.Query(queryBuilder.String(), args...)
 	if err != nil {
 		sc.logger.Error("查询系统日志失败", "error", err)
 		c.JSON(500, gin.H{"error": "查询失败"})
@@ -181,11 +187,12 @@ func (sc *SystemController) GetLogs(c *gin.Context) {
 
 	var logs []map[string]interface{}
 	for rows.Next() {
-		var logLevel, message, details string
+		var logLevel, message string
 		var createdAt time.Time
+		var details sql.NullString // 处理 details 可能为 NULL 的情况
 
-		err := rows.Scan(&logLevel, &message, &details, &createdAt)
-		if err != nil {
+		if err := rows.Scan(&logLevel, &message, &details, &createdAt); err != nil {
+			sc.logger.Error("扫描日志行失败", "error", err)
 			continue
 		}
 
@@ -195,10 +202,15 @@ func (sc *SystemController) GetLogs(c *gin.Context) {
 			"created_at": createdAt,
 		}
 
-		if details != "" {
+		if details.Valid && details.String != "" {
 			var detailsObj map[string]interface{}
-			json.Unmarshal([]byte(details), &detailsObj)
-			logItem["details"] = detailsObj
+			if json.Unmarshal([]byte(details.String), &detailsObj) == nil {
+				logItem["details"] = detailsObj
+			} else {
+				logItem["details"] = details.String // 如果不是json，则作为原始字符串
+			}
+		} else {
+			logItem["details"] = nil
 		}
 
 		logs = append(logs, logItem)
@@ -210,12 +222,12 @@ func (sc *SystemController) GetLogs(c *gin.Context) {
 // CreateBackup 创建备份
 func (sc *SystemController) CreateBackup(c *gin.Context) {
 	backupName := "backup_" + time.Now().Format("20060102_150405")
-	
+
 	// TODO: 实现数据库备份逻辑
 	// 1. 导出数据库
 	// 2. 压缩文件
 	// 3. 保存到指定位置
-	
+
 	sc.logger.Info("创建备份", "name", backupName)
 	c.JSON(200, gin.H{
 		"message": "备份创建成功",
@@ -247,7 +259,7 @@ func (sc *SystemController) RestoreBackup(c *gin.Context) {
 	var req struct {
 		BackupName string `json:"backup_name" binding:"required"`
 	}
-	
+
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(400, gin.H{"error": "参数错误", "details": err.Error()})
 		return
@@ -258,10 +270,10 @@ func (sc *SystemController) RestoreBackup(c *gin.Context) {
 	// 2. 停止相关服务
 	// 3. 恢复数据库
 	// 4. 重启服务
-	
+
 	sc.logger.Info("恢复备份", "name", req.BackupName)
 	c.JSON(200, gin.H{
 		"message": "备份恢复成功",
 		"name":    req.BackupName,
 	})
-} 
+}

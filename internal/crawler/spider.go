@@ -21,7 +21,7 @@ type Spider struct {
 	config  *config.Config
 	storage storage.Storage
 	logger  utils.Logger
-	
+
 	collector *colly.Collector
 	running   bool
 	mu        sync.RWMutex
@@ -37,8 +37,8 @@ func NewSpider(cfg *config.Config, store storage.Storage, logger utils.Logger) *
 	}
 }
 
-// Start 启动爬虫
-func (s *Spider) Start() error {
+// StartWithTask 启动针对单个任务的爬虫
+func (s *Spider) StartWithTask(task *models.CrawlTask) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -46,7 +46,7 @@ func (s *Spider) Start() error {
 		return fmt.Errorf("爬虫已在运行中")
 	}
 
-	s.logger.Info("初始化爬虫...")
+	s.logger.Info("初始化爬虫任务...", "site", task.Name)
 
 	// 创建 Collector
 	c := colly.NewCollector(
@@ -55,46 +55,42 @@ func (s *Spider) Start() error {
 	)
 
 	// 配置 Collector
-	s.setupCollector(c)
+	s.setupCollector(c, task)
 
 	// 设置请求处理
-	s.setupHandlers(c)
+	s.setupHandlers(c, task)
 
 	// 限制并发和延迟
+	concurrent := s.config.Spider.Concurrent
+	delay := s.config.Spider.Delay
+	if task.Rules.Concurrent > 0 {
+		concurrent = task.Rules.Concurrent
+	}
+	if task.Rules.Delay > 0 {
+		delay = task.Rules.Delay
+	}
+
 	c.Limit(&colly.LimitRule{
 		DomainGlob:  "*",
-		Parallelism: s.config.Spider.Concurrent,
-		Delay:       time.Duration(s.config.Spider.Delay) * time.Millisecond,
+		Parallelism: concurrent,
+		Delay:       time.Duration(delay) * time.Millisecond,
 	})
 
 	s.collector = c
 	s.running = true
 
-	// 加载站点配置
-	siteConfig, err := config.LoadSiteConfig()
-	if err != nil {
-		return fmt.Errorf("加载站点配置失败: %w", err)
-	}
-
 	// 开始爬取
-	s.logger.Info("开始爬取数据...")
-	for _, site := range siteConfig.Sites {
-		if !site.Enabled {
-			s.logger.Info("跳过禁用的站点", "site", site.Name)
-			continue
-		}
-
-		s.logger.Info("开始爬取站点", "site", site.Name)
-		for _, url := range site.StartURLs {
-			s.logger.Info("访问URL", "url", url)
-			c.Visit(url)
-		}
+	s.logger.Info("开始爬取站点", "site", task.Name)
+	for _, url := range task.StartURLs {
+		s.logger.Info("访问URL", "url", url)
+		c.Visit(url)
 	}
 
 	// 等待所有请求完成
 	c.Wait()
 
-	s.logger.Info("爬取完成")
+	s.running = false
+	s.logger.Info("站点爬取完成", "site", task.Name)
 	return nil
 }
 
@@ -118,7 +114,7 @@ func (s *Spider) Stop() error {
 }
 
 // setupCollector 配置 Collector
-func (s *Spider) setupCollector(c *colly.Collector) {
+func (s *Spider) setupCollector(c *colly.Collector, task *models.CrawlTask) {
 	// 设置用户代理
 	c.UserAgent = s.config.Spider.UserAgent
 
@@ -130,19 +126,20 @@ func (s *Spider) setupCollector(c *colly.Collector) {
 	extensions.Referer(c)
 
 	// 设置代理（如果配置了）
-	if s.config.Spider.ProxyURL != "" {
-		c.SetProxyFunc(colly.ProxyURL(s.config.Spider.ProxyURL))
-	}
+	// if s.config.Spider.ProxyURL != "" {
+	// 	c.SetProxyFunc(colly.ProxyURL(s.config.Spider.ProxyURL))
+	// }
 
 	// 允许重复访问
 	c.AllowURLRevisit = false
 
 	// 设置允许的域名
-	c.AllowedDomains = []string{} // 根据需要设置
+	domain := getDomainFromURL(task.BaseURL)
+	c.AllowedDomains = []string{domain}
 }
 
 // setupHandlers 设置请求处理器
-func (s *Spider) setupHandlers(c *colly.Collector) {
+func (s *Spider) setupHandlers(c *colly.Collector, task *models.CrawlTask) {
 	// 请求前处理
 	c.OnRequest(func(r *colly.Request) {
 		s.logger.Info("访问页面", "url", r.URL.String())
@@ -153,25 +150,30 @@ func (s *Spider) setupHandlers(c *colly.Collector) {
 		s.logger.Info("收到响应", "url", r.Request.URL.String(), "status", r.StatusCode)
 	})
 
-	// HTML 处理
-	c.OnHTML("html", func(e *colly.HTMLElement) {
-		s.processPage(e)
+	// HTML 处理 - 根据站点配置的item选择器来处理
+	itemSelector := "html"
+	if sel, ok := task.Selectors["item"]; ok && sel != "" {
+		itemSelector = sel
+	}
+
+	c.OnHTML(itemSelector, func(e *colly.HTMLElement) {
+		s.processPage(e, task)
 	})
 
 	// 错误处理
 	c.OnError(func(r *colly.Response, err error) {
 		s.logger.Error("请求失败", "url", r.Request.URL.String(), "error", err.Error())
-		
+
 		// 重试逻辑
 		retryCount := r.Request.Headers.Get("Retry-Count")
 		if retryCount == "" {
 			retryCount = "0"
 		}
-		
+
 		if retryCount < fmt.Sprintf("%d", s.config.Spider.Retries) {
 			newCount := fmt.Sprintf("%d", getRetryCount(retryCount)+1)
 			r.Request.Headers.Set("Retry-Count", newCount)
-			
+
 			s.logger.Info("重试请求", "url", r.Request.URL.String(), "retry", newCount)
 			time.Sleep(time.Second * 2) // 等待2秒后重试
 			r.Request.Retry()
@@ -185,53 +187,73 @@ func (s *Spider) setupHandlers(c *colly.Collector) {
 }
 
 // processPage 处理页面数据
-func (s *Spider) processPage(e *colly.HTMLElement) {
+func (s *Spider) processPage(e *colly.HTMLElement, task *models.CrawlTask) {
 	url := e.Request.URL.String()
-	
+
 	// 创建数据项
 	item := &models.Item{
 		URL:       url,
-		Title:     strings.TrimSpace(e.ChildText("title")),
-		Content:   strings.TrimSpace(e.ChildText("body")),
 		Timestamp: time.Now(),
 		Source:    getDomainFromURL(url),
 	}
 
-	// 提取其他数据
-	s.extractData(e, item)
+	// 根据站点配置的选择器提取数据
+	s.extractData(e, item, task.Selectors)
 
 	// 保存数据
 	if err := s.storage.Save(item); err != nil {
 		s.logger.Error("保存数据失败", "url", url, "error", err)
 	} else {
-		s.logger.Info("数据保存成功", "url", url)
+		s.logger.Info("数据保存成功", "url", url, "title", item.Title)
 	}
 }
 
 // extractData 提取页面数据
-func (s *Spider) extractData(e *colly.HTMLElement, item *models.Item) {
-	// 这里可以根据具体需求添加数据提取逻辑
-	// 例如：
-	// item.Description = e.ChildText("meta[name='description']")
-	// item.Keywords = e.ChildText("meta[name='keywords']")
-	// item.Author = e.ChildText(".author")
-	// item.PublishDate = e.ChildText(".publish-date")
-	
+func (s *Spider) extractData(e *colly.HTMLElement, item *models.Item, selectors map[string]string) {
+	// 动态根据selectors提取数据
+	if sel, ok := selectors["title"]; ok && sel != "" {
+		item.Title = strings.TrimSpace(e.ChildText(sel))
+	} else {
+		item.Title = strings.TrimSpace(e.ChildText("title"))
+	}
+
+	if sel, ok := selectors["content"]; ok && sel != "" {
+		item.Content = strings.TrimSpace(e.ChildText(sel))
+	} else {
+		item.Content = strings.TrimSpace(e.ChildText("body"))
+	}
+
+	if sel, ok := selectors["description"]; ok && sel != "" {
+		item.Description = strings.TrimSpace(e.ChildAttr(sel, "content"))
+	}
+
+	if sel, ok := selectors["keywords"]; ok && sel != "" {
+		item.Keywords = strings.Split(strings.TrimSpace(e.ChildAttr(sel, "content")), ",")
+	}
+
+	if sel, ok := selectors["author"]; ok && sel != "" {
+		item.Author = strings.TrimSpace(e.ChildText(sel))
+	}
+
 	// 提取链接
-	e.ForEach("a[href]", func(i int, el *colly.HTMLElement) {
-		link := el.Attr("href")
-		if link != "" {
-			item.Links = append(item.Links, link)
-		}
-	})
+	if sel, ok := selectors["links"]; ok && sel != "" {
+		e.ForEach(sel, func(_ int, el *colly.HTMLElement) {
+			link := el.Request.AbsoluteURL(el.Attr("href"))
+			if link != "" {
+				item.Links = append(item.Links, link)
+			}
+		})
+	}
 
 	// 提取图片
-	e.ForEach("img[src]", func(i int, el *colly.HTMLElement) {
-		src := el.Attr("src")
-		if src != "" {
-			item.Images = append(item.Images, src)
-		}
-	})
+	if sel, ok := selectors["images"]; ok && sel != "" {
+		e.ForEach(sel, func(_ int, el *colly.HTMLElement) {
+			src := el.Request.AbsoluteURL(el.Attr("src"))
+			if src != "" {
+				item.Images = append(item.Images, src)
+			}
+		})
+	}
 }
 
 // 辅助函数
@@ -257,4 +279,4 @@ func getDomainFromURL(url string) string {
 		return parts[2]
 	}
 	return "unknown"
-} 
+}

@@ -4,7 +4,6 @@ import (
 	"database/sql"
 	"fmt"
 	"strings"
-	"time"
 
 	_ "github.com/go-sql-driver/mysql"
 	_ "github.com/mattn/go-sqlite3"
@@ -43,7 +42,7 @@ func NewDatabaseStorage(cfg config.StorageConfig) (*DatabaseStorage, error) {
 // connect 连接数据库
 func (ds *DatabaseStorage) connect() error {
 	var dsn string
-	
+
 	switch ds.driver {
 	case "sqlite3":
 		dsn = "./data/crawler.db"
@@ -76,7 +75,7 @@ func (ds *DatabaseStorage) connect() error {
 // createTable 创建表
 func (ds *DatabaseStorage) createTable() error {
 	var createSQL string
-	
+
 	switch ds.driver {
 	case "sqlite3":
 		createSQL = `
@@ -128,7 +127,7 @@ func (ds *DatabaseStorage) Save(item *models.Item) error {
 	INSERT OR REPLACE INTO crawl_data 
 	(url, title, content, description, author, source, publish_date, timestamp, keywords, tags, links, images)
 	VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
-	
+
 	if ds.driver == "mysql" {
 		insertSQL = `
 		INSERT INTO crawl_data 
@@ -194,7 +193,7 @@ func (ds *DatabaseStorage) SaveBatch(items []*models.Item) error {
 	INSERT OR REPLACE INTO crawl_data 
 	(url, title, content, description, author, source, publish_date, timestamp, keywords, tags, links, images)
 	VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
-	
+
 	if ds.driver == "mysql" {
 		insertSQL = `
 		INSERT INTO crawl_data 
@@ -286,7 +285,7 @@ func (ds *DatabaseStorage) Count() (int, error) {
 // GetLatest 获取最新数据
 func (ds *DatabaseStorage) GetLatest(limit int) ([]*models.Item, error) {
 	query := "SELECT url, title, content, description, author, source, publish_date, timestamp, keywords, tags, links, images FROM crawl_data ORDER BY timestamp DESC LIMIT ?"
-	
+
 	rows, err := ds.db.Query(query, limit)
 	if err != nil {
 		return nil, err
@@ -340,4 +339,4 @@ func (ds *DatabaseStorage) GetLatest(limit int) ([]*models.Item, error) {
 	}
 
 	return items, nil
-} 
+}

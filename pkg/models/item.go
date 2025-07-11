@@ -7,33 +7,33 @@ import (
 // Item 抓取的数据项
 type Item struct {
 	// 基础信息
-	ID          string    `json:"id"`          // 唯一标识
-	URL         string    `json:"url"`         // 原始URL
-	Title       string    `json:"title"`       // 标题
-	Content     string    `json:"content"`     // 内容
-	Description string    `json:"description"` // 描述
-	
+	ID          string `json:"id"`          // 唯一标识
+	URL         string `json:"url"`         // 原始URL
+	Title       string `json:"title"`       // 标题
+	Content     string `json:"content"`     // 内容
+	Description string `json:"description"` // 描述
+
 	// 元数据
 	Author      string    `json:"author"`       // 作者
 	Source      string    `json:"source"`       // 来源
 	PublishDate time.Time `json:"publish_date"` // 发布时间
 	Timestamp   time.Time `json:"timestamp"`    // 抓取时间
-	
+
 	// 标签和分类
 	Keywords []string `json:"keywords"` // 关键词
 	Tags     []string `json:"tags"`     // 标签
 	Category string   `json:"category"` // 分类
-	
+
 	// 链接和媒体
 	Links  []string `json:"links"`  // 链接
 	Images []string `json:"images"` // 图片
 	Videos []string `json:"videos"` // 视频
-	
+
 	// 额外信息
 	Language string                 `json:"language"` // 语言
 	Status   string                 `json:"status"`   // 状态
 	Metadata map[string]interface{} `json:"metadata"` // 额外元数据
-	
+
 	// 统计信息
 	ViewCount    int `json:"view_count"`    // 浏览量
 	CommentCount int `json:"comment_count"` // 评论数
@@ -129,6 +129,25 @@ func (i *Item) GetHash() string {
 	return i.URL + "|" + i.Title
 }
 
+// CrawlTask 定义了一个独立的、可传递的爬虫任务。
+// 它用于解耦API层和Crawler层。
+type CrawlTask struct {
+	ID        int
+	Name      string
+	BaseURL   string
+	StartURLs []string
+	Selectors map[string]string
+	Rules     CrawlTaskRules
+}
+
+// CrawlTaskRules 定义了任务特定的爬取规则。
+type CrawlTaskRules struct {
+	MaxDepth   int
+	MaxPages   int
+	Concurrent int
+	Delay      int
+}
+
 // Comment 评论模型
 type Comment struct {
 	ID        string    `json:"id"`
@@ -150,70 +169,18 @@ func NewComment(itemID, author, content string) *Comment {
 	}
 }
 
-// CrawlTask 爬虫任务模型
-type CrawlTask struct {
-	ID          string                 `json:"id"`
-	Name        string                 `json:"name"`
-	URLs        []string               `json:"urls"`
-	Status      string                 `json:"status"`      // pending, running, completed, failed
-	StartTime   time.Time              `json:"start_time"`
-	EndTime     time.Time              `json:"end_time"`
-	ItemsCount  int                    `json:"items_count"`
-	ErrorsCount int                    `json:"errors_count"`
-	Config      map[string]interface{} `json:"config"`
-	Results     []string               `json:"results"` // 结果文件路径
-}
-
-// NewCrawlTask 创建新的爬虫任务
-func NewCrawlTask(name string, urls []string) *CrawlTask {
-	return &CrawlTask{
-		Name:      name,
-		URLs:      urls,
-		Status:    "pending",
-		StartTime: time.Now(),
-		Config:    make(map[string]interface{}),
-		Results:   []string{},
-	}
-}
-
-// Start 开始任务
-func (t *CrawlTask) Start() {
-	t.Status = "running"
-	t.StartTime = time.Now()
-}
-
-// Complete 完成任务
-func (t *CrawlTask) Complete() {
-	t.Status = "completed"
-	t.EndTime = time.Now()
-}
-
-// Fail 任务失败
-func (t *CrawlTask) Fail() {
-	t.Status = "failed"
-	t.EndTime = time.Now()
-}
-
-// GetDuration 获取任务持续时间
-func (t *CrawlTask) GetDuration() time.Duration {
-	if t.EndTime.IsZero() {
-		return time.Since(t.StartTime)
-	}
-	return t.EndTime.Sub(t.StartTime)
-}
-
 // CrawlStatistics 爬虫统计信息
 type CrawlStatistics struct {
-	TotalItems      int           `json:"total_items"`
-	SuccessfulItems int           `json:"successful_items"`
-	FailedItems     int           `json:"failed_items"`
-	TotalTime       time.Duration `json:"total_time"`
-	AverageTime     time.Duration `json:"average_time"`
-	ItemsPerSecond  float64       `json:"items_per_second"`
-	Sources         map[string]int `json:"sources"`         // 来源统计
-	Categories      map[string]int `json:"categories"`      // 分类统计
-	Languages       map[string]int `json:"languages"`       // 语言统计
-	Errors          []string       `json:"errors"`          // 错误列表
+	TotalItems      int            `json:"total_items"`
+	SuccessfulItems int            `json:"successful_items"`
+	FailedItems     int            `json:"failed_items"`
+	TotalTime       time.Duration  `json:"total_time"`
+	AverageTime     time.Duration  `json:"average_time"`
+	ItemsPerSecond  float64        `json:"items_per_second"`
+	Sources         map[string]int `json:"sources"`    // 来源统计
+	Categories      map[string]int `json:"categories"` // 分类统计
+	Languages       map[string]int `json:"languages"`  // 语言统计
+	Errors          []string       `json:"errors"`     // 错误列表
 }
 
 // NewCrawlStatistics 创建新的统计信息
@@ -234,17 +201,17 @@ func (s *CrawlStatistics) AddItem(item *Item, success bool) {
 	} else {
 		s.FailedItems++
 	}
-	
+
 	// 统计来源
 	if item.Source != "" {
 		s.Sources[item.Source]++
 	}
-	
+
 	// 统计分类
 	if item.Category != "" {
 		s.Categories[item.Category]++
 	}
-	
+
 	// 统计语言
 	if item.Language != "" {
 		s.Languages[item.Language]++
@@ -256,7 +223,7 @@ func (s *CrawlStatistics) AddError(error string) {
 	s.Errors = append(s.Errors, error)
 }
 
-// Calculate 计算统计数据
+// Calculate 计算最终统计数据
 func (s *CrawlStatistics) Calculate() {
 	if s.TotalItems > 0 && s.TotalTime > 0 {
 		s.AverageTime = s.TotalTime / time.Duration(s.TotalItems)
@@ -277,11 +244,11 @@ type SiteConfig struct {
 
 // CrawlRules 爬虫规则
 type CrawlRules struct {
-	MaxDepth        int      `json:"max_depth"`         // 最大深度
-	MaxPages        int      `json:"max_pages"`         // 最大页面数
-	RespectRobots   bool     `json:"respect_robots"`    // 是否遵守robots.txt
-	AllowedDomains  []string `json:"allowed_domains"`   // 允许的域名
+	MaxDepth         int      `json:"max_depth"`         // 最大深度
+	MaxPages         int      `json:"max_pages"`         // 最大页面数
+	RespectRobots    bool     `json:"respect_robots"`    // 是否遵守robots.txt
+	AllowedDomains   []string `json:"allowed_domains"`   // 允许的域名
 	ForbiddenDomains []string `json:"forbidden_domains"` // 禁止的域名
-	URLPatterns     []string `json:"url_patterns"`      // URL模式
-	ContentTypes    []string `json:"content_types"`     // 内容类型
-} 
+	URLPatterns      []string `json:"url_patterns"`      // URL模式
+	ContentTypes     []string `json:"content_types"`     // 内容类型
+}

@@ -3,15 +3,15 @@ package api
 import (
 	"database/sql"
 
-	"github.com/gin-gonic/gin"
 	"example.com/m/v2/internal/config"
 	"example.com/m/v2/internal/utils"
+	"github.com/gin-gonic/gin"
 )
 
 // SetupRoutes 设置API路由
 func SetupRoutes(r *gin.RouterGroup, db *sql.DB, logger utils.Logger, cfg *config.Config) {
 	// 创建控制器
-	siteController := NewSiteController(db, logger)
+	siteController := NewSiteController(db, logger, cfg)
 	taskController := NewTaskController(db, logger, cfg)
 	dataController := NewDataController(db, logger)
 	systemController := NewSystemController(db, logger, cfg)
@@ -26,6 +26,7 @@ func SetupRoutes(r *gin.RouterGroup, db *sql.DB, logger utils.Logger, cfg *confi
 		sites.DELETE("/:id", siteController.DeleteSite)
 		sites.POST("/:id/test", siteController.TestSite)
 		sites.PUT("/:id/toggle", siteController.ToggleSite)
+		sites.POST("/:id/run", siteController.RunSiteTask) // 添加运行任务的路由
 	}
 
 	// 任务管理路由
@@ -81,4 +82,4 @@ func SetupRoutes(r *gin.RouterGroup, db *sql.DB, logger utils.Logger, cfg *confi
 			"go_version": "1.21",
 		})
 	})
-} 
+}

@@ -45,6 +45,7 @@ export const updateSite = (id: number, data: any) => api.put(`/sites/${id}`, dat
 export const deleteSite = (id: number) => api.delete(`/sites/${id}`);
 export const testSite = (id: number) => api.post(`/sites/${id}/test`);
 export const toggleSite = (id: number) => api.put(`/sites/${id}/toggle`);
+export const runSiteTask = (id: number) => api.post(`/sites/${id}/run`);
 
 // 任务管理API
 export const getTasks = (params?: any) => api.get('/tasks', { params });

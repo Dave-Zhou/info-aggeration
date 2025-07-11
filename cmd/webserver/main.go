@@ -9,11 +9,11 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/gin-gonic/gin"
 	"example.com/m/v2/internal/api"
 	"example.com/m/v2/internal/config"
 	"example.com/m/v2/internal/database"
 	"example.com/m/v2/internal/utils"
+	"github.com/gin-gonic/gin"
 )
 
 var (
@@ -46,8 +46,8 @@ func main() {
 		log.Fatalf("初始化数据库表失败: %v", err)
 	}
 
-	// 设置Gin模式
-	if cfg.Debug.Enable {
+	// 设置Gin模式，与日志级别关联
+	if cfg.Logging.Level == "debug" {
 		gin.SetMode(gin.DebugMode)
 	} else {
 		gin.SetMode(gin.ReleaseMode)
@@ -55,7 +55,7 @@ func main() {
 
 	// 创建路由
 	router := gin.New()
-	
+
 	// 添加中间件
 	router.Use(gin.Logger())
 	router.Use(gin.Recovery())
@@ -99,4 +99,4 @@ func main() {
 	}
 
 	logger.Info("Web服务器已关闭")
-} 
+}

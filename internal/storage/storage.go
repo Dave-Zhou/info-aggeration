@@ -1,7 +1,6 @@
 package storage
 
 import (
-	"fmt"
 	"example.com/m/v2/internal/config"
 	"example.com/m/v2/pkg/models"
 )
@@ -15,14 +14,6 @@ type Storage interface {
 
 // NewStorage 创建存储实例
 func NewStorage(cfg config.StorageConfig) (Storage, error) {
-	switch cfg.Type {
-	case "file":
-		return NewFileStorage(cfg)
-	case "database":
-		return NewDatabaseStorage(cfg)
-	case "excel":
-		return NewExcelStorage(cfg)
-	default:
-		return nil, fmt.Errorf("不支持的存储类型: %s", cfg.Type)
-	}
-} 
+	// 移除了文件和Excel存储后，只返回数据库存储
+	return NewDatabaseStorage(cfg)
+}

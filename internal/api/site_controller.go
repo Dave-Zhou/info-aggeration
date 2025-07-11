@@ -3,26 +3,30 @@ package api
 import (
 	"database/sql"
 	"encoding/json"
-	"net/http"
 	"strconv"
 	"time"
 
-	"github.com/gin-gonic/gin"
+	"example.com/m/v2/internal/config"
+	"example.com/m/v2/internal/crawler"
+	"example.com/m/v2/internal/storage"
 	"example.com/m/v2/internal/utils"
 	"example.com/m/v2/pkg/models"
+	"github.com/gin-gonic/gin"
 )
 
 // SiteController 站点控制器
 type SiteController struct {
 	db     *sql.DB
 	logger utils.Logger
+	config *config.Config
 }
 
 // NewSiteController 创建站点控制器
-func NewSiteController(db *sql.DB, logger utils.Logger) *SiteController {
+func NewSiteController(db *sql.DB, logger utils.Logger, cfg *config.Config) *SiteController {
 	return &SiteController{
 		db:     db,
 		logger: logger,
+		config: cfg,
 	}
 }
 
@@ -74,7 +78,7 @@ func (sc *SiteController) ListSites(c *gin.Context) {
 	// 构建查询条件
 	where := "1=1"
 	args := []interface{}{}
-	
+
 	if enabled != "" {
 		where += " AND enabled = ?"
 		args = append(args, enabled == "true")
@@ -204,39 +208,14 @@ func (sc *SiteController) GetSite(c *gin.Context) {
 		return
 	}
 
-	query := `
-		SELECT id, name, base_url, description, start_urls, selectors, rules, 
-		       enabled, created_at, updated_at, status, last_run_at
-		FROM sites WHERE id = ?
-	`
-	
-	var site SiteResponse
-	var startURLsJSON, selectorsJSON, rulesJSON string
-	var lastRunAt sql.NullTime
-
-	err = sc.db.QueryRow(query, id).Scan(
-		&site.ID, &site.Name, &site.BaseURL, &site.Description,
-		&startURLsJSON, &selectorsJSON, &rulesJSON,
-		&site.Enabled, &site.CreatedAt, &site.UpdatedAt,
-		&site.Status, &lastRunAt,
-	)
-	if err == sql.ErrNoRows {
-		c.JSON(404, gin.H{"error": "站点不存在"})
-		return
-	}
+	site, err := sc.getSiteByID(id)
 	if err != nil {
-		sc.logger.Error("查询站点详情失败", "error", err)
-		c.JSON(500, gin.H{"error": "查询失败"})
+		if err == sql.ErrNoRows {
+			c.JSON(404, gin.H{"error": "站点不存在"})
+		} else {
+			c.JSON(500, gin.H{"error": "查询失败"})
+		}
 		return
-	}
-
-	// 解析JSON字段
-	json.Unmarshal([]byte(startURLsJSON), &site.StartURLs)
-	json.Unmarshal([]byte(selectorsJSON), &site.Selectors)
-	json.Unmarshal([]byte(rulesJSON), &site.Rules)
-
-	if lastRunAt.Valid {
-		site.LastRunAt = &lastRunAt.Time
 	}
 
 	c.JSON(200, gin.H{"data": site})
@@ -303,20 +282,26 @@ func (sc *SiteController) DeleteSite(c *gin.Context) {
 	}
 
 	// 删除站点
-	_, err = sc.db.Exec("DELETE FROM sites WHERE id = ?", id)
+	result, err := sc.db.Exec("DELETE FROM sites WHERE id = ?", id)
 	if err != nil {
 		sc.logger.Error("删除站点失败", "error", err)
 		c.JSON(500, gin.H{"error": "删除失败"})
 		return
 	}
 
-	sc.logger.Info("删除站点成功", "id", id)
+	rowsAffected, _ := result.RowsAffected()
+	if rowsAffected == 0 {
+		c.JSON(404, gin.H{"error": "站点不存在"})
+		return
+	}
+
+	sc.logger.Info("站点已删除", "id", id)
 	c.JSON(200, gin.H{"message": "站点删除成功"})
 }
 
-// TestSite 测试站点配置
+// TestSite 测试站点规则（模拟运行）
 func (sc *SiteController) TestSite(c *gin.Context) {
-	id, err := strconv.Atoi(c.Param("id"))
+	_, err := strconv.Atoi(c.Param("id")) // id 暂时未使用，用_忽略
 	if err != nil {
 		c.JSON(400, gin.H{"error": "无效的站点ID"})
 		return
@@ -324,17 +309,14 @@ func (sc *SiteController) TestSite(c *gin.Context) {
 
 	// TODO: 实现站点测试逻辑
 	// 1. 获取站点配置
-	// 2. 创建测试爬虫
-	// 3. 抓取第一个URL
-	// 4. 返回测试结果
+	// 2. 启动一个一次性的爬虫任务
+	// 3. 返回初步的抓取结果
 
-	c.JSON(200, gin.H{
-		"message": "测试功能开发中",
-		"status":  "pending",
-	})
+	sc.logger.Info("收到站点测试请求")
+	c.JSON(202, gin.H{"message": "测试任务已启动，请稍后查看结果"})
 }
 
-// ToggleSite 切换站点状态
+// ToggleSite 切换站点启用状态
 func (sc *SiteController) ToggleSite(c *gin.Context) {
 	id, err := strconv.Atoi(c.Param("id"))
 	if err != nil {
@@ -374,4 +356,105 @@ func (sc *SiteController) ToggleSite(c *gin.Context) {
 		"message": "站点状态已" + status,
 		"enabled": newEnabled,
 	})
-} 
+}
+
+// RunSiteTask 运行单个站点爬虫任务
+func (sc *SiteController) RunSiteTask(c *gin.Context) {
+	id, err := strconv.Atoi(c.Param("id"))
+	if err != nil {
+		c.JSON(400, gin.H{"error": "无效的站点ID"})
+		return
+	}
+
+	site, err := sc.getSiteByID(id)
+	if err != nil {
+		if err == sql.ErrNoRows {
+			c.JSON(404, gin.H{"error": "站点不存在"})
+		} else {
+			c.JSON(500, gin.H{"error": "查询失败"})
+		}
+		return
+	}
+
+	if !site.Enabled {
+		c.JSON(400, gin.H{"error": "该站点已被禁用，无法运行任务"})
+		return
+	}
+
+	go func() {
+		sc.logger.Info("开始后台爬虫任务", "site", site.Name)
+		// 每次任务创建独立的存储和爬虫实例
+		store, err := storage.NewStorage(sc.config.Storage)
+		if err != nil {
+			sc.logger.Error("创建存储实例失败", "error", err, "site", site.Name)
+			return
+		}
+		defer store.Close()
+
+		spider := crawler.NewSpider(sc.config, store, sc.logger)
+
+		// 更新任务状态为 'running'
+		sc.db.Exec("UPDATE sites SET status = 'running', last_run_at = NOW() WHERE id = ?", site.ID)
+
+		// 将 api.SiteResponse 转换为 models.CrawlTask
+		task := &models.CrawlTask{
+			ID:        site.ID,
+			Name:      site.Name,
+			BaseURL:   site.BaseURL,
+			StartURLs: site.StartURLs,
+			Selectors: site.Selectors,
+			Rules: models.CrawlTaskRules{
+				MaxDepth:   site.Rules.MaxDepth,
+				MaxPages:   site.Rules.MaxPages,
+				Concurrent: site.Rules.Concurrent,
+				Delay:      site.Rules.Delay,
+			},
+		}
+
+		if err := spider.StartWithTask(task); err != nil {
+			sc.logger.Error("爬虫任务执行失败", "error", err, "site", site.Name)
+		} else {
+			sc.logger.Info("爬虫任务成功完成", "site", site.Name)
+		}
+
+		// 任务结束后更新状态为 'ready'
+		sc.db.Exec("UPDATE sites SET status = 'ready' WHERE id = ?", site.ID)
+	}()
+
+	c.JSON(202, gin.H{"message": "爬虫任务已在后台启动"})
+}
+
+// getSiteByID 是一个辅助函数，用于通过ID获取站点信息
+func (sc *SiteController) getSiteByID(id int) (*SiteResponse, error) {
+	query := `
+		SELECT id, name, base_url, description, start_urls, selectors, rules, 
+		       enabled, created_at, updated_at, status, last_run_at
+		FROM sites WHERE id = ?
+	`
+
+	var site SiteResponse
+	var startURLsJSON, selectorsJSON, rulesJSON string
+	var lastRunAt sql.NullTime
+
+	err := sc.db.QueryRow(query, id).Scan(
+		&site.ID, &site.Name, &site.BaseURL, &site.Description,
+		&startURLsJSON, &selectorsJSON, &rulesJSON,
+		&site.Enabled, &site.CreatedAt, &site.UpdatedAt,
+		&site.Status, &lastRunAt,
+	)
+	if err != nil {
+		sc.logger.Error("查询站点详情失败", "id", id, "error", err)
+		return nil, err
+	}
+
+	// 解析JSON字段
+	json.Unmarshal([]byte(startURLsJSON), &site.StartURLs)
+	json.Unmarshal([]byte(selectorsJSON), &site.Selectors)
+	json.Unmarshal([]byte(rulesJSON), &site.Rules)
+
+	if lastRunAt.Valid {
+		site.LastRunAt = &lastRunAt.Time
+	}
+
+	return &site, nil
+}
