@@ -1,0 +1,249 @@
+# Colly 爬虫配置文件
+
+# 爬虫配置
+spider:
+  concurrent: 5                    # 并发数
+  delay: 1000                      # 请求间隔（毫秒）
+  timeout: 30                      # 超时时间（秒）
+  retries: 3                       # 重试次数
+  user_agent: "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36"
+  
+  # 代理设置（可选）
+  proxy_url: ""                    # 代理地址，留空则不使用代理
+  
+  # 爬虫规则
+  max_depth: 10                    # 最大深度
+  max_pages: 1000                  # 最大页面数
+  respect_robots: true             # 是否遵守robots.txt
+  
+  # 允许的域名（留空则不限制）
+  allowed_domains: []
+  
+  # 禁止的域名
+  forbidden_domains:
+    - "login.example.com"
+    - "admin.example.com"
+  
+  # URL模式过滤
+  url_patterns:
+    - ".*\\.html$"                # 只抓取HTML页面
+    - ".*\\.php$"                 # 抓取PHP页面
+  
+  # 支持的内容类型
+  content_types:
+    - "text/html"
+    - "application/json"
+    - "application/xml"
+
+# 存储配置
+storage:
+  type: "file"                     # 存储类型: file, database, excel, csv
+  output_dir: "./data/output"      # 输出目录
+  
+  # 数据库配置（当type为database时使用）
+  database:
+    driver: "sqlite3"              # 数据库驱动: sqlite3, mysql, postgres
+    host: "localhost"              # 主机地址
+    port: 3306                     # 端口
+    username: "root"               # 用户名
+    password: "password"           # 密码
+    database: "crawler_db"         # 数据库名
+    
+    # SQLite特定设置
+    sqlite_file: "./data/crawler.db"
+
+# 日志配置
+logging:
+  level: "info"                    # 日志级别: debug, info, warn, error
+  file: "./data/logs/crawler.log"  # 日志文件路径
+  max_size: 100                    # 日志文件最大大小（MB）
+  max_backups: 5                   # 保留的日志文件数量
+  max_age: 30                      # 日志文件保留天数
+  compress: true                   # 是否压缩旧日志文件
+
+# 性能配置
+performance:
+  queue_size: 10000                # 队列大小
+  worker_count: 10                 # 工作协程数
+  batch_size: 100                  # 批处理大小
+  flush_interval: 5000             # 刷新间隔（毫秒）
+  
+  # 内存限制
+  max_memory: 1024                 # 最大内存使用（MB）
+  
+  # 文件大小限制
+  max_content_size: 10             # 最大内容大小（MB）
+  max_image_size: 5                # 最大图片大小（MB）
+
+# 过滤配置
+filters:
+  # 内容过滤
+  min_content_length: 100          # 最小内容长度
+  max_content_length: 1000000      # 最大内容长度
+  
+  # 标题过滤
+  min_title_length: 5              # 最小标题长度
+  max_title_length: 200            # 最大标题长度
+  
+  # 语言过滤
+  languages:                       # 支持的语言
+    - "zh"                         # 中文
+    - "en"                         # 英文
+  
+  # 重复过滤
+  enable_deduplication: true       # 是否启用去重
+  dedup_field: "url"               # 去重字段: url, title, content
+  
+  # 关键词过滤
+  required_keywords: []            # 必须包含的关键词
+  excluded_keywords:               # 排除的关键词
+    - "advertisement"
+    - "广告"
+    - "404"
+    - "error"
+
+# 数据处理配置
+processing:
+  # 文本处理
+  clean_html: true                 # 是否清理HTML标签
+  extract_links: true              # 是否提取链接
+  extract_images: true             # 是否提取图片
+  extract_emails: true             # 是否提取邮箱
+  extract_phones: true             # 是否提取电话
+  
+  # 内容增强
+  auto_summary: false              # 是否自动生成摘要
+  keyword_extraction: true         # 是否提取关键词
+  language_detection: true         # 是否检测语言
+  
+  # 数据验证
+  validate_urls: true              # 是否验证URL
+  validate_emails: true            # 是否验证邮箱
+  
+  # 数据转换
+  convert_encoding: true           # 是否转换编码
+  normalize_whitespace: true       # 是否规范化空白字符
+
+# 通知配置
+notifications:
+  enable: false                    # 是否启用通知
+  
+  # 邮件通知
+  email:
+    smtp_server: "smtp.gmail.com"
+    smtp_port: 587
+    username: "your-email@gmail.com"
+    password: "your-password"
+    to_addresses:
+      - "admin@example.com"
+    
+  # 钉钉通知
+  dingtalk:
+    webhook_url: ""
+    secret: ""
+    
+  # 企业微信通知
+  wechat:
+    webhook_url: ""
+
+# 监控配置
+monitoring:
+  enable: true                     # 是否启用监控
+  metrics_interval: 60             # 指标收集间隔（秒）
+  
+  # 监控指标
+  metrics:
+    - "requests_per_second"        # 每秒请求数
+    - "success_rate"               # 成功率
+    - "error_rate"                 # 错误率
+    - "response_time"              # 响应时间
+    - "memory_usage"               # 内存使用
+    - "cpu_usage"                  # CPU使用
+    
+  # 告警配置
+  alerts:
+    error_rate_threshold: 0.1      # 错误率阈值
+    response_time_threshold: 5000  # 响应时间阈值（毫秒）
+    memory_usage_threshold: 80     # 内存使用阈值（%）
+
+# 扩展配置
+extensions:
+  # 自定义处理器
+  custom_processors: []
+  
+  # 插件配置
+  plugins:
+    - name: "image_processor"
+      enabled: false
+      config:
+        download_images: false
+        resize_images: false
+        max_width: 1200
+        max_height: 800
+        
+    - name: "text_analyzer"
+      enabled: false
+      config:
+        sentiment_analysis: false
+        keyword_density: false
+        readability_score: false
+        
+    - name: "link_checker"
+      enabled: false
+      config:
+        check_external_links: false
+        check_images: false
+        timeout: 10
+
+# 调试配置
+debug:
+  enable: false                    # 是否启用调试模式
+  save_html: false                 # 是否保存HTML
+  save_requests: false             # 是否保存请求
+  verbose_logging: false           # 是否详细日志
+  profile_memory: false            # 是否内存分析
+  profile_cpu: false               # 是否CPU分析
+
+# Web服务器配置
+web:
+  port: 8080                       # Web服务器端口
+  static_path: "./web/build"       # 静态文件路径
+  api_prefix: "/api/v1"            # API前缀
+  
+  # CORS配置
+  cors:
+    origins:                       # 允许的来源
+      - "http://localhost:3000"
+      - "http://localhost:8080"
+    methods:                       # 允许的方法
+      - "GET"
+      - "POST"
+      - "PUT"
+      - "DELETE"
+      - "OPTIONS"
+    headers:                       # 允许的头部
+      - "Origin"
+      - "Content-Type"
+      - "Accept"
+      - "Authorization"
+      - "X-Requested-With"
+  
+  # 认证配置（预留）
+  auth:
+    enable: false                  # 是否启用认证
+    jwt_secret: "your-secret-key"  # JWT密钥
+    token_expire: 24               # Token过期时间（小时）
+  
+  # 限流配置
+  rate_limit:
+    enable: false                  # 是否启用限流
+    requests_per_minute: 60        # 每分钟请求数
+    
+  # 文件上传配置
+  upload:
+    max_size: 10                   # 最大文件大小（MB）
+    allowed_types:                 # 允许的文件类型
+      - "json"
+      - "yaml"
+      - "csv"
+      - "xlsx" 
